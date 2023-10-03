@@ -8,6 +8,7 @@
 #include "google/protobuf/generated_message_tctable_gen.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -756,6 +757,24 @@ TailCallTableInfo::TailCallTableInfo(
     }
   }
 
+  size_t num_non_cold_subtables = 0;
+  for (const FieldDescriptor* field : ordered_fields) {
+    auto options = option_provider.GetForField(field);
+    if ((field->type() == FieldDescriptor::TYPE_MESSAGE ||
+         field->type() == FieldDescriptor::TYPE_GROUP) &&
+        !field->is_map() && !HasLazyRep(field, options)) {
+      if (!options.is_implicitly_weak && options.use_direct_tcparser_table &&
+          options.presence_probability >= 0.005) {
+        num_non_cold_subtables++;
+      }
+    }
+  }
+
+  size_t subtable_aux_idx_begin = aux_entries.size();
+  aux_entries.resize(aux_entries.size() + num_non_cold_subtables);
+
+  std::vector<size_t> non_cold_subtable_idx;
+
   // Fill in mini table entries.
   for (const FieldDescriptor* field : ordered_fields) {
     auto options = option_provider.GetForField(field);
@@ -797,12 +816,15 @@ TailCallTableInfo::TailCallTableInfo(
               TcParseTableBase::FieldEntry::kNoAuxIdx;
         }
       } else {
-        field_entries.back().aux_idx = aux_entries.size();
-        aux_entries.push_back({options.is_implicitly_weak ? kSubMessageWeak
-                               : options.use_direct_tcparser_table
-                                   ? kSubTable
-                                   : kSubMessage,
-                               {field}});
+        AuxType type = options.is_implicitly_weak          ? kSubMessageWeak
+                       : options.use_direct_tcparser_table ? kSubTable
+                                                           : kSubMessage;
+        if (type == kSubTable && options.presence_probability >= 0.005) {
+          non_cold_subtable_idx.push_back(field_entries.size() - 1);
+        } else {
+          field_entries.back().aux_idx = aux_entries.size();
+          aux_entries.push_back({type, {field}});
+        }
       }
     } else if (field->type() == FieldDescriptor::TYPE_ENUM &&
                !cpp::HasPreservingUnknownEnumSemantics(field)) {
@@ -844,6 +866,15 @@ TailCallTableInfo::TailCallTableInfo(
       // the aux_idx (this will limit the range to 8 bits).
       entry.inlined_string_idx = idx;
     }
+  }
+
+  ABSL_CHECK(non_cold_subtable_idx.size() == num_non_cold_subtables);
+  size_t aux_idx = subtable_aux_idx_begin;
+  for (size_t idx : non_cold_subtable_idx) {
+    field_entries[idx].aux_idx = aux_idx;
+    aux_entries[aux_idx].type = kSubTable;
+    aux_entries[aux_idx].field = field_entries[idx].field;
+    aux_idx++;
   }
 
   table_size_log2 = 0;  // fallback value
