@@ -3217,9 +3217,11 @@ const internal::TcParseTableBase* Reflection::CreateTcParseTableReflectionOnly()
   // We use `operator new` here because the destruction will be done with
   // `operator delete` unconditionally.
   void* p = ::operator new(sizeof(Table));
-  auto* full_table = ::new (p)
-      Table{{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, schema_.default_instance_, nullptr},
-            {{{&internal::TcParser::ReflectionParseLoop, {}}}}};
+  auto* full_table =
+      ::new (p) Table{{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, schema_.default_instance_,
+                       nullptr, nullptr},
+                      {{{&internal::TcParser::ReflectionParseLoop, {}}}}};
+  full_table->header.to_prefetch = &full_table->header;
   ABSL_DCHECK_EQ(static_cast<void*>(&full_table->header),
                  static_cast<void*>(full_table));
   return &full_table->header;
@@ -3448,7 +3450,9 @@ const internal::TcParseTableBase* Reflection::CreateTcParseTable() const {
       static_cast<uint16_t>(table_info.aux_entries.size()),
       aux_offset,
       schema_.default_instance_,
-      &internal::TcParser::ReflectionFallback};
+      &internal::TcParser::ReflectionFallback,
+      nullptr};
+  res->to_prefetch = res;
 
   // Now copy the rest of the payloads
   PopulateTcParseFastEntries(table_info, res->fast_entry(0));
