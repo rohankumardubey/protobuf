@@ -19,6 +19,7 @@ cc_library(
     deps = [
         ":internal",
         "//upb:port",
+        "@com_google_absl//absl/utility",
     ],
 )
 
