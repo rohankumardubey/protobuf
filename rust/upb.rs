@@ -404,16 +404,9 @@ macro_rules! impl_repeated_primitives {
                     ) }
                 }
                 pub fn copy_from(&mut self, src: &RepeatedField<'_, $rs_type>) {
-                    // TODO: Optimize this copy_from implementation using memcopy.
-                    // NOTE: `src` cannot be `self` because this would violate borrowing rules.
-                    unsafe { upb_Array_Resize(self.inner.raw, 0, self.inner.arena.raw()) };
-                    // `upb_Array_DeepClone` is not used here because it returns
-                    // a new `upb_Array*`. The contained `RawRepeatedField` must
-                    // then be set to this new pointer, but other copies of this
-                    // pointer may exist because of re-borrowed `RepeatedMut`s.
-                    // Alternatively, a `clone_into` method could be exposed by upb.
-                    for i in 0..src.len() {
-                        self.push(src.get(i).unwrap());
+                    unsafe {
+                        upb_Array_Resize(self.inner.raw, src.len(), self.inner.arena.raw());
+                        ptr::copy_nonoverlapping(src.inner.raw.as_ptr(), self.inner.raw.as_ptr(), src.len());
                     }
                 }
             }
